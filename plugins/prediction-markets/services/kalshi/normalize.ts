@@ -1,0 +1,251 @@
+import {
+  PREDICTION_CATALOG_MAX_EVENT_MARKETS,
+  takeTopByMetric,
+} from "../../cache";
+import { matchesPredictionCategory } from "../../categories";
+import { matchesPredictionSearchHaystack } from "../../search";
+import type {
+  PredictionBookLevel,
+  PredictionBrowseTab,
+  PredictionCategoryId,
+  PredictionMarketSummary,
+} from "../../types";
+import { parseFloatSafe } from "../fetch";
+import type {
+  KalshiEventRecord,
+  KalshiMarketRecord,
+} from "./types";
+
+export function normalizeKalshiBookLevel(
+  level: [string, string],
+): PredictionBookLevel | null {
+  const price = parseFloatSafe(level[0]);
+  const size = parseFloatSafe(level[1]);
+  if (price == null || size == null) return null;
+  return { price, size };
+}
+
+function getKalshiDisplayPrice(record: KalshiMarketRecord): {
+  yesPrice: number | null;
+  noPrice: number | null;
+  lastTradePrice: number | null;
+} {
+  const yesBid = parseFloatSafe(record.yes_bid_dollars);
+  const yesAsk = parseFloatSafe(record.yes_ask_dollars);
+  const lastPrice = parseFloatSafe(record.last_price_dollars);
+  const midpoint =
+    yesBid != null && yesAsk != null
+      ? (yesBid + yesAsk) / 2
+      : (yesAsk ?? yesBid ?? null);
+  const displayYesPrice =
+    lastPrice != null && lastPrice > 0 ? lastPrice : midpoint;
+  return {
+    yesPrice: displayYesPrice,
+    noPrice: displayYesPrice != null ? Math.max(0, 1 - displayYesPrice) : null,
+    lastTradePrice:
+      lastPrice != null && lastPrice > 0 ? lastPrice : displayYesPrice,
+  };
+}
+
+export function kalshiNotionalDollars(record: Pick<KalshiMarketRecord, "notional_value_dollars">): number {
+  return parseFloatSafe(record.notional_value_dollars) ?? 1;
+}
+
+export function kalshiContractsToUsd(
+  contracts: number | null | undefined,
+  notionalDollars = 1,
+): number | null {
+  if (contracts == null || !Number.isFinite(contracts)) return null;
+  const notional = Number.isFinite(notionalDollars) && notionalDollars > 0 ? notionalDollars : 1;
+  return contracts * notional;
+}
+
+export function isOpenKalshiStatus(status: string | null | undefined): boolean {
+  const normalized = status?.trim().toLowerCase();
+  return normalized === "open" || normalized === "active";
+}
+
+function isDormantKalshiMarket(record: KalshiMarketRecord): boolean {
+  const values = [
+    parseFloatSafe(record.last_price_dollars),
+    parseFloatSafe(record.yes_bid_dollars),
+    parseFloatSafe(record.yes_ask_dollars),
+    parseFloatSafe(record.no_bid_dollars),
+    parseFloatSafe(record.no_ask_dollars),
+    parseFloatSafe(record.volume_24h_fp),
+    parseFloatSafe(record.open_interest_fp),
+  ];
+  if (!values.every((value) => value == null || value === 0)) return false;
+  return (
+    record.is_provisional === true ||
+    record.status === "initialized" ||
+    record.status === "open"
+  );
+}
+
+export function normalizeKalshiMarket(
+  record: KalshiMarketRecord,
+  eventMeta?: {
+    title?: string;
+    category?: string;
+    series_ticker?: string;
+    event_ticker?: string;
+    sub_title?: string;
+  },
+  options?: { allowDormant?: boolean; catalog?: boolean },
+): PredictionMarketSummary | null {
+  if (record.market_type && record.market_type !== "binary") return null;
+  if (!options?.allowDormant && isDormantKalshiMarket(record)) return null;
+
+  const yesBid = parseFloatSafe(record.yes_bid_dollars);
+  const yesAsk = parseFloatSafe(record.yes_ask_dollars);
+  const noBid = parseFloatSafe(record.no_bid_dollars);
+  const noAsk = parseFloatSafe(record.no_ask_dollars);
+  const prices = getKalshiDisplayPrice(record);
+  const notional = kalshiNotionalDollars(record);
+  const category = eventMeta?.category?.trim();
+  const hasTargetMetadata =
+    record.strike_type != null ||
+    record.floor_strike != null ||
+    record.cap_strike != null ||
+    record.custom_strike != null;
+  const conciseTargetLabel = record.yes_sub_title?.trim();
+  const marketLabel =
+    hasTargetMetadata &&
+    conciseTargetLabel &&
+    conciseTargetLabel.length > 0 &&
+    conciseTargetLabel.toLowerCase() !== "yes" &&
+    conciseTargetLabel.toLowerCase() !== "no"
+      ? conciseTargetLabel
+      : record.title;
+  const eventLabel = [eventMeta?.title?.trim(), eventMeta?.sub_title?.trim()]
+    .filter((value): value is string => !!value && value.length > 0)
+    .join(" · ");
+
+  return {
+    key: `kalshi:${record.ticker}`,
+    venue: "kalshi",
+    marketId: record.ticker,
+    title: record.title,
+    marketLabel,
+    eventLabel: eventLabel || eventMeta?.title || record.title,
+    eventTicker: record.event_ticker ?? eventMeta?.event_ticker,
+    seriesTicker: eventMeta?.series_ticker,
+    category,
+    tags: category ? [category] : [],
+    status: record.status === "active" ? "open" : (record.status ?? "unknown"),
+    url: `https://kalshi.com/markets/${record.ticker}`,
+    description: options?.catalog
+      ? ""
+      : [record.rules_primary, record.rules_secondary]
+        .filter(Boolean)
+        .join("\n\n"),
+    rulesPrimary: options?.catalog ? undefined : record.rules_primary,
+    rulesSecondary: options?.catalog ? undefined : record.rules_secondary,
+    endsAt: record.close_time ?? null,
+    updatedAt:
+      record.updated_time ?? record.open_time ?? record.created_time ?? null,
+    createdAt: record.created_time ?? record.open_time ?? null,
+    yesPrice: prices.yesPrice,
+    noPrice: prices.noPrice,
+    yesBid,
+    yesAsk,
+    noBid,
+    noAsk,
+    spread: yesBid != null && yesAsk != null ? yesAsk - yesBid : null,
+    lastTradePrice: prices.lastTradePrice,
+    volume24h: kalshiContractsToUsd(parseFloatSafe(record.volume_24h_fp), notional),
+    volume24hUnit: "usd",
+    totalVolume: kalshiContractsToUsd(parseFloatSafe(record.volume_fp), notional),
+    totalVolumeUnit: "usd",
+    openInterest: kalshiContractsToUsd(parseFloatSafe(record.open_interest_fp), notional),
+    openInterestUnit: "usd",
+    liquidity: parseFloatSafe(record.liquidity_dollars),
+    liquidityUnit: "usd",
+  };
+}
+
+function sortKalshiMarkets(
+  markets: PredictionMarketSummary[],
+  browseTab: PredictionBrowseTab = "top",
+): PredictionMarketSummary[] {
+  return [...markets].sort((left, right) => {
+    if (browseTab === "ending") {
+      const leftEnds = left.endsAt ? new Date(left.endsAt).getTime() : Infinity;
+      const rightEnds = right.endsAt ? new Date(right.endsAt).getTime() : Infinity;
+      return leftEnds - rightEnds;
+    }
+    if (browseTab === "new") {
+      const leftCreated = left.createdAt ? new Date(left.createdAt).getTime() : 0;
+      const rightCreated = right.createdAt ? new Date(right.createdAt).getTime() : 0;
+      return rightCreated - leftCreated;
+    }
+    return (right.volume24h ?? 0) - (left.volume24h ?? 0);
+  });
+}
+
+function flattenKalshiEvents(
+  events: KalshiEventRecord[],
+  searchQuery = "",
+  categoryId: PredictionCategoryId = "all",
+): PredictionMarketSummary[] {
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const deduped = new Map<string, PredictionMarketSummary>();
+
+  for (const event of events) {
+    const eventText = normalizedQuery
+      ? [event.title, event.category ?? "", event.sub_title ?? ""]
+        .join(" ")
+        .toLowerCase()
+      : "";
+    const rawMarkets = takeTopByMetric(
+      event.markets ?? [],
+      PREDICTION_CATALOG_MAX_EVENT_MARKETS,
+      (market) => parseFloatSafe(market.volume_24h_fp) ?? 0,
+    );
+    for (const market of rawMarkets) {
+      const normalized = normalizeKalshiMarket(market, {
+        title: event.title,
+        category: event.category,
+        series_ticker: event.series_ticker,
+        event_ticker: event.event_ticker,
+        sub_title: event.sub_title,
+      }, { catalog: true });
+      if (!normalized) continue;
+      if (
+        categoryId !== "all" &&
+        !matchesPredictionCategory(normalized, categoryId)
+      ) {
+        continue;
+      }
+      if (normalizedQuery) {
+        const searchText = [
+          normalized.title,
+          normalized.marketLabel,
+          normalized.eventLabel,
+          normalized.category ?? "",
+          normalized.marketId,
+          eventText,
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!matchesPredictionSearchHaystack(searchText, normalizedQuery)) continue;
+      }
+      deduped.set(normalized.key, normalized);
+    }
+  }
+
+  return [...deduped.values()];
+}
+
+export function normalizeKalshiCatalog(
+  events: KalshiEventRecord[],
+  searchQuery: string,
+  categoryId: PredictionCategoryId,
+  browseTab: PredictionBrowseTab = "top",
+): PredictionMarketSummary[] {
+  return sortKalshiMarkets(
+    flattenKalshiEvents(events, searchQuery, categoryId),
+    browseTab,
+  );
+}

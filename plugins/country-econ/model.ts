@@ -1,0 +1,80 @@
+import type { DataTableColumn } from "gloomberb/components";
+import { compareSortValues, type SortPreference } from "gloomberb/utils";
+import type { CountryEconKind, CountryEconRow } from "./types";
+
+export type CountryEconColumnId = "iso3" | "name" | "kind" | "year" | "value";
+export type CountryEconColumn = DataTableColumn & { id: CountryEconColumnId };
+export type CountryEconSort = SortPreference<CountryEconColumnId>;
+export type KindFilter = "all" | CountryEconKind;
+
+export const DEFAULT_COUNTRY_ECON_SORT: CountryEconSort = {
+  columnId: "value",
+  direction: "desc",
+};
+
+export const KIND_CYCLE: KindFilter[] = ["all", "country", "region"];
+
+export function nextKindFilter(current: KindFilter): KindFilter {
+  const index = KIND_CYCLE.indexOf(current);
+  return KIND_CYCLE[(index + 1) % KIND_CYCLE.length]!;
+}
+
+export function buildCountryEconColumns(): CountryEconColumn[] {
+  return [
+    { id: "iso3", label: "ISO", width: 5, align: "left" },
+    { id: "name", label: "NAME", width: 12, align: "left", flexGrow: 1 },
+    { id: "kind", label: "KIND", width: 8, align: "left" },
+    { id: "year", label: "YEAR", width: 6, align: "right" },
+    { id: "value", label: "VALUE", width: 14, align: "right" },
+  ];
+}
+
+function sortValue(columnId: CountryEconColumnId, row: CountryEconRow): string | number | null {
+  switch (columnId) {
+    case "iso3":
+      return row.iso3;
+    case "name":
+      return row.name;
+    case "kind":
+      return row.kind;
+    case "year":
+      return row.year;
+    case "value":
+      return row.value;
+  }
+}
+
+export function sortCountryEconRows(
+  rows: CountryEconRow[],
+  sort: CountryEconSort,
+): CountryEconRow[] {
+  const columnId = sort.columnId ?? "value";
+  return [...rows].sort((left, right) => {
+    const compared = compareSortValues(
+      sortValue(columnId, left),
+      sortValue(columnId, right),
+      sort.direction,
+    );
+    return compared !== 0 ? compared : left.name.localeCompare(right.name);
+  });
+}
+
+export function nextCountryEconSort(
+  current: CountryEconSort,
+  columnId: CountryEconColumnId,
+): CountryEconSort {
+  if (current.columnId !== columnId) {
+    return { columnId, direction: columnId === "name" || columnId === "iso3" ? "asc" : "desc" };
+  }
+  if (current.direction === "desc") return { columnId, direction: "asc" };
+  if (current.direction === "asc") return { columnId, direction: "desc" };
+  return DEFAULT_COUNTRY_ECON_SORT;
+}
+
+export function visibleCountryEconRows(
+  rows: CountryEconRow[],
+  kind: KindFilter,
+): CountryEconRow[] {
+  if (kind === "all") return rows;
+  return rows.filter((row) => row.kind === kind);
+}

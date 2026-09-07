@@ -1,0 +1,235 @@
+import type { BrokerPosition } from "gloomberb/types/broker";
+import type { BrokerAccount } from "gloomberb/types/trading";
+
+export interface BrokerPortfolioSnapshot {
+  accounts: BrokerAccount[];
+  positions: BrokerPosition[];
+}
+
+export interface RobinhoodPositionPayloadSource {
+  toolName: string;
+  payload: unknown;
+}
+
+type UnknownRecord = Record<string, unknown>;
+
+function record(value: unknown): UnknownRecord | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as UnknownRecord
+    : null;
+}
+
+function text(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return "";
+}
+
+function numberValue(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const parsed = typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.replaceAll(",", ""))
+        : Number.NaN;
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function nested(source: UnknownRecord, key: string): UnknownRecord {
+  return record(source[key]) ?? {};
+}
+
+function allRecords(value: unknown, output: UnknownRecord[] = [], seen = new Set<object>()): UnknownRecord[] {
+  if (value === null || typeof value !== "object" || seen.has(value)) return output;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) allRecords(item, output, seen);
+    return output;
+  }
+  const item = value as UnknownRecord;
+  output.push(item);
+  for (const child of Object.values(item)) allRecords(child, output, seen);
+  return output;
+}
+
+function accountId(source: UnknownRecord): string {
+  return text(
+    source.accountId,
+    source.account_id,
+    source.accountNumber,
+    source.account_number,
+    source.brokerageAccountId,
+    source.brokerage_account_id,
+  );
+}
+
+function titleCase(value: string): string {
+  return value.toLowerCase().replace(/(^|[_\s-])([a-z])/g, (_match, prefix: string, letter: string) => (
+    `${prefix === "_" ? " " : prefix}${letter.toUpperCase()}`
+  ));
+}
+
+function uniqueSnapshot(accounts: BrokerAccount[], positions: BrokerPosition[]): BrokerPortfolioSnapshot {
+  const uniqueAccounts = [...new Map(accounts.map((account) => [account.accountId, account])).values()];
+  const knownAccounts = new Set(uniqueAccounts.map((account) => account.accountId));
+  for (const position of positions) {
+    if (!position.accountId || knownAccounts.has(position.accountId)) continue;
+    knownAccounts.add(position.accountId);
+    uniqueAccounts.push({
+      accountId: position.accountId,
+      name: position.accountId,
+      currency: position.currency,
+    });
+  }
+  return { accounts: uniqueAccounts, positions: mergeIdenticalPositions(positions.map(withCanonicalShares)) };
+}
+
+/**
+ * Canonicalize broker positions so `shares` is a positive magnitude and `side`
+ * carries the direction. Some broker feeds report short shares as negative
+ * while also tagging `side: "short"`; leaving shares negative double-signs every
+ * downstream consumer that derives direction from `side`.
+ */
+function withCanonicalShares(position: BrokerPosition): BrokerPosition {
+  const side = position.side ?? (position.shares < 0 ? "short" : "long");
+  const shares = Math.abs(position.shares);
+  if (shares === position.shares && side === position.side) return position;
+  return { ...position, shares, side };
+}
+
+function signedBrokerShares(position: BrokerPosition): number {
+  return Math.abs(position.shares) * (position.side === "short" ? -1 : 1);
+}
+
+function mergeIdenticalPositions(positions: BrokerPosition[]): BrokerPosition[] {
+  const merged = new Map<string, BrokerPosition>();
+  for (const position of positions) {
+    const key = [
+      position.accountId ?? "",
+      position.ticker,
+      position.assetCategory ?? "",
+      position.exchange ?? "",
+      position.brokerContract?.conId ?? "",
+    ].join(":");
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, position);
+      continue;
+    }
+    // The key ignores side, so opposing legs of one contract land here and must
+    // still net out. That needs signed magnitudes now that `shares` is canonical.
+    const existingShares = signedBrokerShares(existing);
+    const nextShares = signedBrokerShares(position);
+    const shares = existingShares + nextShares;
+    const existingCost = (existing.avgCost ?? 0) * existingShares;
+    const nextCost = (position.avgCost ?? 0) * nextShares;
+    merged.set(key, {
+      ...existing,
+      shares: Math.abs(shares),
+      side: shares < 0 ? "short" : "long",
+      avgCost: shares !== 0 ? (existingCost + nextCost) / shares : existing.avgCost,
+      marketValue: sumOptional(existing.marketValue, position.marketValue),
+      unrealizedPnl: sumOptional(existing.unrealizedPnl, position.unrealizedPnl),
+    });
+  }
+  return [...merged.values()];
+}
+
+function sumOptional(left?: number, right?: number): number | undefined {
+  if (left == null && right == null) return undefined;
+  return (left ?? 0) + (right ?? 0);
+}
+
+export function normalizeRobinhoodSnapshot(
+  accountsPayload: unknown,
+  positionSources: readonly RobinhoodPositionPayloadSource[] | unknown,
+): BrokerPortfolioSnapshot {
+  const accounts = allRecords(accountsPayload).flatMap((item): BrokerAccount[] => {
+    const id = accountId(item);
+    if (!id) return [];
+    const type = text(item.accountType, item.account_type, item.type);
+    const currency = text(item.currency, item.baseCurrency, item.base_currency, "USD").toUpperCase();
+    const cashBalance = numberValue(item.cashBalance, item.cash_balance, item.cash);
+    return [{
+      accountId: id,
+      name: text(item.name, item.accountName, item.account_name, type && titleCase(type), id),
+      currency,
+      netLiquidation: numberValue(item.totalValue, item.total_value, item.portfolioValue, item.portfolio_value),
+      totalCashValue: numberValue(item.totalCashValue, item.total_cash_value, cashBalance),
+      cashBalances: cashBalance == null ? undefined : [{ currency, quantity: cashBalance }],
+      buyingPower: numberValue(item.buyingPower, item.buying_power),
+    }];
+  });
+
+  const sources: readonly RobinhoodPositionPayloadSource[] = Array.isArray(positionSources)
+    && positionSources.every((source) => (
+      source !== null
+      && typeof source === "object"
+      && "toolName" in source
+      && "payload" in source
+    ))
+    ? positionSources as readonly RobinhoodPositionPayloadSource[]
+    : [{ toolName: "get_equity_positions", payload: positionSources }];
+  const positions = sources.flatMap(({ toolName, payload }) => allRecords(payload).flatMap((item): BrokerPosition[] => {
+    const instrument = nested(item, "instrument");
+    const account = nested(item, "account");
+    const costBasis = record(item.costBasis) ?? record(item.cost_basis) ?? {};
+    const lastPrice = record(item.lastPrice) ?? record(item.last_price) ?? {};
+    const symbol = text(item.symbol, item.ticker, instrument.symbol).toUpperCase();
+    const shares = numberValue(item.quantity, item.shares, item.qty);
+    if (!symbol || shares == null || shares === 0) return [];
+    // No canonicalCryptoInstrument — use raw symbols for crypto positions.
+    const isCrypto = toolName === "get_crypto_positions";
+    const totalCost = numberValue(
+      item.totalCost,
+      item.total_cost,
+      typeof item.costBasis === "object" ? undefined : item.costBasis,
+      typeof item.cost_basis === "object" ? undefined : item.cost_basis,
+      costBasis.totalCost,
+      costBasis.total_cost,
+    );
+    const avgCost = numberValue(
+      item.averageCost,
+      item.average_cost,
+      item.averageBuyPrice,
+      item.average_buy_price,
+      item.costBasisPerShare,
+      item.cost_basis_per_share,
+      costBasis.unitCost,
+      costBasis.unit_cost,
+      totalCost != null ? totalCost / Math.abs(shares) : undefined,
+    );
+    const marketValue = numberValue(item.marketValue, item.market_value, item.currentValue, item.current_value);
+    const markPrice = numberValue(
+      item.markPrice,
+      item.mark_price,
+      item.price,
+      item.lastPrice,
+      item.last_price,
+      lastPrice.lastPrice,
+      lastPrice.last_price,
+      lastPrice.price,
+      marketValue != null ? marketValue / Math.abs(shares) : undefined,
+    );
+    return [{
+      ticker: symbol,
+      exchange: text(item.exchange, instrument.exchange, "SMART").toUpperCase(),
+      shares,
+      avgCost,
+      currency: text(item.currency, instrument.currency, "USD").toUpperCase(),
+      accountId: accountId(item) || accountId(account) || undefined,
+      name: text(item.name, item.description, instrument.name, symbol),
+      assetCategory: isCrypto ? "CRYPTO" : "STK",
+      markPrice,
+      marketValue,
+      unrealizedPnl: numberValue(item.unrealizedPnl, item.unrealized_pnl, item.unrealizedGain, item.unrealized_gain),
+      side: shares < 0 ? "short" : "long",
+    }];
+  }));
+
+  return uniqueSnapshot(accounts, positions);
+}

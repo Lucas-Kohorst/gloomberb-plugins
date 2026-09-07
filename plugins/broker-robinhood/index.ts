@@ -1,0 +1,194 @@
+import type { GloomPlugin } from "gloomberb/types/plugin";
+import type { BrokerAdapter, BrokerConnectionStatus } from "gloomberb/types/broker";
+import type { BrokerInstanceConfig } from "gloomberb/types/config";
+import type { BrokerOrderRequest } from "gloomberb/types/trading";
+import { createConnection, withConnectionRequest } from "gloomberb/plugins";
+import { isRobinhoodOAuthConfigured, robinhoodConfigSchema } from "./connection";
+import type { BrokerPortfolioSnapshot } from "./normalize";
+
+const ROBINHOOD_CONNECTION_ID = "robinhood";
+
+// Inlined native-loader — lazily imports the MCP client module so the SDK
+// and node:http only load when a sync or trade actually runs.
+type RobinhoodNativeModule = typeof import("./robinhood-native");
+
+function loadRobinhoodNativeModule(): Promise<RobinhoodNativeModule> {
+  return import("./robinhood-native");
+}
+
+const statuses = new Map<string, BrokerConnectionStatus>();
+const statusListeners = new Map<string, Set<() => void>>();
+
+let disposeRobinhoodConnection: (() => void) | null = null;
+
+function setStatus(instanceId: string, state: BrokerConnectionStatus["state"], message?: string): void {
+  statuses.set(instanceId, { state, message, mode: "oauth", updatedAt: Date.now() });
+  for (const listener of statusListeners.get(instanceId) ?? []) listener();
+}
+
+async function loadRobinhoodPortfolio(instance: BrokerInstanceConfig): Promise<BrokerPortfolioSnapshot> {
+  setStatus(instance.id, "connecting", "Waiting for Robinhood");
+  try {
+    const snapshot = await withConnectionRequest(ROBINHOOD_CONNECTION_ID, "sync-portfolio", async () => {
+      const module = await loadRobinhoodNativeModule();
+      return module.loadRobinhoodPortfolio(instance);
+    });
+    setStatus(instance.id, "connected", "OAuth · read accounts, trade Agentic");
+    return snapshot;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Robinhood sync failed.";
+    setStatus(instance.id, "error", message);
+    throw error;
+  }
+}
+
+async function withRobinhoodRuntime<T>(
+  instance: BrokerInstanceConfig,
+  operation: string,
+  run: (module: RobinhoodNativeModule) => Promise<T>,
+): Promise<T> {
+  return withConnectionRequest(ROBINHOOD_CONNECTION_ID, operation, async () => {
+    const module = await loadRobinhoodNativeModule();
+    return run(module);
+  });
+}
+
+export const robinhoodBroker: BrokerAdapter = {
+  id: "robinhood",
+  name: "Robinhood",
+  autoSync: false,
+  configSchema: robinhoodConfigSchema(),
+
+  async validate(instance) {
+    return isRobinhoodOAuthConfigured(instance);
+  },
+
+  async importPositions(instance) {
+    return (await loadRobinhoodPortfolio(instance)).positions;
+  },
+
+  async importPortfolioSnapshot(instance) {
+    return loadRobinhoodPortfolio(instance);
+  },
+
+  async listAccounts(instance) {
+    return (await loadRobinhoodPortfolio(instance)).accounts;
+  },
+
+  async connect(_instance) {
+  },
+
+  async disconnect(instance) {
+    setStatus(instance.id, "disconnected");
+    // Don't await the native/browser module: hosted loads it as a separate
+    // chunk, and a missing or slow import would freeze Disconnect.
+    void loadRobinhoodNativeModule()
+      .then((module) => module.robinhoodBroker.disconnect?.(instance))
+      .catch(() => {});
+  },
+
+  getStatus(instance) {
+    return statuses.get(instance.id) ?? {
+      state: instance.config.oauth ? "connected" : "disconnected",
+      message: instance.config.oauth
+        ? "OAuth · read accounts, trade Agentic"
+        : "Sign in during the first sync",
+      mode: "oauth",
+      updatedAt: 0,
+    };
+  },
+
+  subscribeStatus(instance, listener) {
+    const listeners = statusListeners.get(instance.id) ?? new Set();
+    listeners.add(listener);
+    statusListeners.set(instance.id, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) statusListeners.delete(instance.id);
+    };
+  },
+
+  async getPersistedConfigUpdate(instance) {
+    try {
+      const module = await loadRobinhoodNativeModule();
+      return module.robinhoodBroker.getPersistedConfigUpdate?.(instance) ?? null;
+    } catch {
+      return null;
+    }
+  },
+
+  async previewOrder(instance, request: BrokerOrderRequest) {
+    return withRobinhoodRuntime(instance, "preview-order", (module) => {
+      if (!module.robinhoodBroker.previewOrder) {
+        throw new Error("Robinhood order preview is unavailable in this app.");
+      }
+      return module.robinhoodBroker.previewOrder(instance, request);
+    });
+  },
+
+  async placeOrder(instance, request: BrokerOrderRequest) {
+    return withRobinhoodRuntime(instance, "place-order", (module) => {
+      if (!module.robinhoodBroker.placeOrder) {
+        throw new Error("Robinhood trading is unavailable in this app.");
+      }
+      return module.robinhoodBroker.placeOrder(instance, request);
+    });
+  },
+
+  async cancelOrder(instance, orderId: number) {
+    await withRobinhoodRuntime(instance, "cancel-order", async (module) => {
+      if (!module.robinhoodBroker.cancelOrder) {
+        throw new Error("Robinhood cancel is unavailable in this app.");
+      }
+      await module.robinhoodBroker.cancelOrder(instance, orderId);
+    });
+  },
+
+  toConfigValues() {
+    return { connectionMode: "oauth" };
+  },
+
+  fromConfigValues(_values, previous) {
+    return {
+      connectionMode: "oauth",
+      ...(previous?.config.oauth ? { oauth: previous.config.oauth } : {}),
+    };
+  },
+};
+
+export const robinhoodPlugin: GloomPlugin = {
+  id: "robinhood",
+  name: "Robinhood",
+  version: "1.0.0",
+  description: "Read every Robinhood account; trade only the Agentic account.",
+  toggleable: true,
+  targets: ["cli", "tui", "desktop"],
+  broker: robinhoodBroker,
+  paneTemplates: [
+    {
+      id: "robinhood-connect",
+      paneId: "brokers",
+      label: "Robinhood",
+      description: "Sign in to Robinhood. Reads all accounts; trades the Agentic account",
+      keywords: ["robinhood", "hood", "rh", "broker", "positions", "sync", "oauth", "agentic", "trade"],
+      shortcut: { prefix: "RH" },
+      singleton: true,
+      createInstance: () => ({ placement: "floating" }),
+    },
+  ],
+  setup(ctx) {
+    disposeRobinhoodConnection = createConnection(ctx, {
+      id: ROBINHOOD_CONNECTION_ID,
+      name: "Robinhood",
+      kind: "broker",
+      priority: 400,
+      authRequired: true,
+    });
+  },
+  dispose() {
+    disposeRobinhoodConnection?.();
+    disposeRobinhoodConnection = null;
+  },
+};
+
+export default robinhoodPlugin;

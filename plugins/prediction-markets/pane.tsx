@@ -1,0 +1,382 @@
+import { Box, Input, Text } from "gloomberb/ui";
+import { useCallback, useMemo } from "react";
+import {
+  DataTableStackView,
+  Spinner,
+  Tabs,
+  usePaneFooter,
+  useTableLoadMore,
+  useUpdatedAgo,
+  type DataTableKeyEvent,
+  type DataTableRootKeyContext,
+} from "gloomberb/components";
+import { openUrl } from "gloomberb/components";
+import { useShortcut } from "gloomberb/react";
+import { usePluginAppActions } from "gloomberb/react";
+import type { PaneProps } from "gloomberb/types/plugin";
+import { colors } from "gloomberb/theme";
+import { usePredictionMarketsController } from "./controller";
+import { PredictionMarketDetailPane } from "./detail/pane";
+import { resolvePredictionDetailTitle } from "./detail/shared";
+import { createPredictionColumns } from "./columns";
+import { getPredictionColumnValue } from "./metrics";
+import {
+  buildPredictionListRowRevision,
+  predictionChartExpression,
+  resolvePredictionGraphMarket,
+} from "./rows";
+import { PREDICTION_FILTER_TABS, VENUE_TABS, resolvePredictionFilterId } from "./navigation";
+import { isPlainArrowUp, stopSearchFocusNavigation } from "gloomberb/utils";
+import { paneDelayedStatus, paneLiveStatus } from "gloomberb/react";
+import type {
+  PredictionColumnDef,
+  PredictionListRow,
+} from "./types";
+
+export function PredictionMarketsPane({ focused, width, height }: PaneProps) {
+  const controller = usePredictionMarketsController({ focused });
+  const watchlistedRowKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const row of controller.visibleRows) {
+      if (row.watchMarketKeys.some((marketKey) => controller.watchlistSet.has(marketKey))) {
+        keys.add(row.key);
+      }
+    }
+    return keys;
+  }, [controller.visibleRows, controller.watchlistSet]);
+  const catalogStatusColor =
+    controller.catalogStatus?.tone === "danger"
+      ? colors.negative
+      : colors.borderFocused;
+  const visibleColumns = useMemo(
+    () => createPredictionColumns(width, controller.paneSettings.columnIds),
+    [controller.paneSettings.columnIds, width],
+  );
+  // An empty watchlist yields zero rows no matter what the catalog returns, so
+  // a spinner here would never resolve.
+  const emptyWatchlist =
+    controller.categoryId === "watchlist" && controller.watchlistSet.size === 0;
+  const rowsLoading =
+    controller.visibleRows.length === 0 &&
+    !emptyWatchlist &&
+    (controller.catalogLoadCount > 0 || controller.searchLoading);
+  const detailTitle = resolvePredictionDetailTitle({
+    detail: controller.detail,
+    selectedRow: controller.selectedDetailRow,
+    selectedSummary: controller.selectedSummary,
+  });
+  const marketUrl = controller.selectedSummary?.url || controller.selectedRow?.url || null;
+  const openMarket = useCallback(() => {
+    if (!marketUrl) return;
+    openUrl(marketUrl);
+  }, [marketUrl]);
+  const { createPaneFromTemplate } = usePluginAppActions();
+  const graphExpression = useMemo(() => {
+    const summary = controller.selectedSummary
+      ?? resolvePredictionGraphMarket(controller.selectedRow);
+    return predictionChartExpression(summary);
+  }, [controller.selectedRow, controller.selectedSummary]);
+  const graphSelected = useCallback(() => {
+    if (graphExpression) {
+      createPaneFromTemplate("chart-composer-pane", { arg: graphExpression });
+    }
+  }, [createPaneFromTemplate, graphExpression]);
+  const catalogUpdatedAgo = useUpdatedAgo(controller.catalogLastRefreshAt);
+  const detailUpdatedAgo = useUpdatedAgo(controller.lastRefreshAt);
+  const updatedAgo = controller.detailOpen ? detailUpdatedAgo : catalogUpdatedAgo;
+  const liveBook = controller.detailOpen && controller.selectedSummary?.venue === "polymarket";
+  const catalogLive = !controller.detailOpen && controller.catalogLive;
+  const includeKalshi =
+    controller.effectiveVenueScope === "all" || controller.effectiveVenueScope === "kalshi";
+  const kalshiDelayed = includeKalshi && controller.kalshiFeed === "delayed";
+  const kalshiLive = includeKalshi && controller.kalshiFeed === "live";
+  const newsTabOpen = controller.detailOpen && controller.detailTab === "news";
+  useShortcut((event) => {
+    if (!focused) return;
+    if (event.name === "g" && graphExpression) {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      graphSelected();
+      return;
+    }
+    if (newsTabOpen || event.name !== "o" || !marketUrl) return;
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    openMarket();
+  }, { enabled: focused && ((!newsTabOpen && !!marketUrl) || !!graphExpression) });
+  usePaneFooter("prediction-markets", () => {
+    return {
+      info: [
+        ...(controller.detailOpen ? [] : controller.searchQuery.trim() ? [{ id: "search", parts: [{ text: `search: ${controller.searchQuery.trim()}`, tone: "value" as const }] }] : []),
+        ...(controller.detailOpen ? [] : controller.searchLoading ? [{ id: "search-loading", parts: [{ text: "searching", tone: "muted" as const }] }] : []),
+        ...(controller.detailOpen ? [] : controller.catalogStatus ? [{
+          id: "catalog",
+          parts: [{ text: controller.catalogStatus.message, tone: controller.catalogStatus.tone === "danger" ? "warning" as const : "muted" as const, color: catalogStatusColor }],
+        }] : []),
+        ...(liveBook || catalogLive || (!controller.detailOpen && kalshiLive) ? [paneLiveStatus()] : []),
+        ...(!liveBook && kalshiDelayed ? [paneDelayedStatus()] : []),
+        ...(updatedAgo ? [{ id: "updated", parts: [{ text: `updated ${updatedAgo}`, tone: "muted" as const }] }] : []),
+      ],
+      hints: [
+        { id: "graph", key: "g", label: "raph", onPress: graphSelected, disabled: !graphExpression },
+        ...(!controller.detailOpen ? [
+          { id: "search", key: "/", label: "search", onPress: controller.actions.focusSearch },
+          { id: "refresh", key: "r", label: "efresh", onPress: controller.actions.refreshCatalog },
+          { id: "watch", key: "w", label: "atch", onPress: controller.selectedRow ? () => controller.actions.toggleWatchlist(controller.selectedRow!) : undefined, disabled: !controller.selectedRow },
+        ] : []),
+        ...(!newsTabOpen && marketUrl ? [{ id: "open", key: "o", label: "pen", onPress: openMarket }] : []),
+      ],
+    };
+  }, [
+    catalogStatusColor,
+    controller.catalogStatus?.message,
+    controller.catalogStatus?.tone,
+    controller.catalogLastRefreshAt,
+    controller.detailOpen,
+    controller.detailTab,
+    controller.effectiveVenueScope,
+    controller.lastRefreshAt,
+    controller.searchLoading,
+    controller.searchQuery,
+    controller.selectedRow?.key,
+    controller.selectedSummary?.venue,
+    controller.kalshiFeed,
+    graphExpression,
+    graphSelected,
+    kalshiDelayed,
+    kalshiLive,
+    catalogLive,
+    liveBook,
+    marketUrl,
+    newsTabOpen,
+    openMarket,
+    updatedAgo,
+  ]);
+
+  const venueTabItems = useMemo(
+    () => VENUE_TABS.map((tab) => ({ label: tab.label, value: tab.value })),
+    [],
+  );
+  const venueTabs = !controller.paneSettings.hideTabs ? (
+    <Tabs
+      tabs={venueTabItems}
+      activeValue={controller.effectiveVenueScope}
+      onSelect={controller.actions.setVenue}
+      compact
+    />
+  ) : null;
+
+  // Search and one filter strip share a row. Ending/New sit with All/Watchlist
+  // and the topic chips so hosted does not render two competing tab bars.
+  const searchBrowseAndCategories = (
+    <Box flexDirection="row" height={1} paddingX={1} gap={2}>
+      <Box
+        flexDirection="row"
+        onMouseDown={controller.actions.focusSearch}
+        width={Math.max(14, Math.floor(width * 0.22))}
+      >
+        <Text fg={colors.textDim}>{controller.searchFocused ? "?" : "/"}</Text>
+        <Box width={1} />
+        {controller.searchFocused ? (
+          <Input
+            ref={controller.searchInputRef}
+            value={controller.searchQuery}
+            focused={focused}
+            placeholder="search markets"
+            placeholderColor={colors.textDim}
+            textColor={colors.text}
+            backgroundColor={colors.panel}
+            flexGrow={1}
+            onInput={controller.actions.setSearchQuery}
+            onChange={controller.actions.setSearchQuery}
+            onSubmit={controller.actions.blurSearch}
+          />
+        ) : (
+          <Box flexGrow={1}>
+            <Text
+              fg={
+                controller.searchQuery.trim().length > 0
+                  ? colors.text
+                  : colors.textDim
+              }
+            >
+              {controller.searchQuery.trim().length > 0
+                ? controller.searchQuery
+                : "search markets"}
+            </Text>
+          </Box>
+        )}
+      </Box>
+      <Tabs
+        tabs={PREDICTION_FILTER_TABS.map((tab) => ({
+          label: tab.label,
+          value: tab.id,
+        }))}
+        activeValue={resolvePredictionFilterId(
+          controller.categoryId,
+          controller.browseTab,
+        )}
+        onSelect={(value) =>
+          controller.actions.selectFilter(value as (typeof PREDICTION_FILTER_TABS)[number]["id"])
+        }
+        compact
+        variant="bare"
+        scrollable={false}
+      />
+    </Box>
+  );
+
+  const browseControls = (
+    <>
+      {venueTabs}
+      {searchBrowseAndCategories}
+    </>
+  );
+
+  const renderCell = useCallback((
+    row: PredictionListRow,
+    column: PredictionColumnDef,
+  ) => {
+    const watchlisted = watchlistedRowKeys.has(row.key);
+    const value = getPredictionColumnValue(column, row, watchlisted);
+    if (column.id === "watch") {
+      return {
+        text: value.text,
+        color: value.color,
+        onMouseDown: (event: any) => {
+          event.preventDefault();
+          event.stopPropagation?.();
+          controller.actions.toggleWatchlist(row);
+        },
+      };
+    }
+    return {
+      text: value.text,
+      color: value.color,
+    };
+  }, [
+    controller.actions.toggleWatchlist,
+    watchlistedRowKeys,
+  ]);
+
+  const getRowRevision = useCallback((row: PredictionListRow) => {
+    return buildPredictionListRowRevision(
+      row,
+      watchlistedRowKeys.has(row.key),
+      Date.now(),
+    );
+  }, [watchlistedRowKeys]);
+
+  const onCatalogScroll = useTableLoadMore(
+    controller.scrollRef,
+    controller.catalogHasMore && !controller.catalogLoadingMore && !controller.detailOpen,
+    () => { void controller.actions.loadMoreCatalog(); },
+  );
+
+  const handleRootKeyDown = useCallback((
+    event: DataTableKeyEvent,
+    context: DataTableRootKeyContext,
+  ) => {
+    if (context.selectedIndex <= 0 && isPlainArrowUp(event)) {
+      stopSearchFocusNavigation(event);
+      controller.actions.focusSearch();
+      return true;
+    }
+    return false;
+  }, [controller.actions.focusSearch]);
+
+  const detailContent =
+    controller.selectedSummary && controller.selectedDetailRow ? (
+      <Box
+        flexDirection="column"
+        flexGrow={1}
+        flexShrink={1}
+        flexBasis={0}
+        minHeight={0}
+        width={width}
+        height={Math.max(height - 1, 1)}
+        paddingX={1}
+        overflow="hidden"
+        backgroundColor={colors.panel}
+      >
+        <PredictionMarketDetailPane
+          detail={controller.detail}
+          detailError={controller.detailError}
+          detailLoadCount={controller.detailLoadCount}
+          detailTab={controller.detailTab}
+          detailWidth={Math.max(width - 2, 24)}
+          focused={focused && controller.detailOpen}
+          height={Math.max(height - 1, 1)}
+          historyRange={controller.historyRange}
+          onDetailTabChange={controller.actions.setDetailTab}
+          onHistoryRangeChange={controller.actions.setHistoryRange}
+          onSelectMarket={controller.actions.selectMarket}
+          scrollRef={controller.detailScrollRef}
+          selectedRow={controller.selectedDetailRow}
+          selectedSummary={controller.selectedSummary}
+        />
+      </Box>
+    ) : (
+      <Box flexGrow={1} backgroundColor={colors.panel} />
+    );
+
+  return (
+    <DataTableStackView<PredictionListRow, PredictionColumnDef>
+      focused={focused}
+      keyboardNavigation={!controller.searchFocused}
+      detailOpen={controller.detailOpen && !!controller.selectedSummary}
+      onBack={controller.actions.closeDetail}
+      detailContent={detailContent}
+      detailTitle={detailTitle}
+      rootBefore={browseControls}
+      rootWidth={width}
+      rootHeight={height}
+      rootBackgroundColor={colors.panel}
+      selection={{
+        kind: "id",
+        selectedId: controller.selectedRow?.key ?? null,
+        getId: (row) => row.key,
+        onChange: (key, _row, _index, reason) =>
+          controller.actions.setBrowseSelection(key, {
+            debounceDetail: reason === "keyboard",
+          }),
+      }}
+      onActivate={(row) =>
+        controller.actions.openSelectedRow(row.key)}
+      onRootKeyDown={handleRootKeyDown}
+      columns={visibleColumns}
+      items={controller.visibleRows}
+      sortColumnId={controller.sortPreference.columnId}
+      sortDirection={controller.sortPreference.direction}
+      onHeaderClick={controller.actions.handleSortHeaderClick}
+      headerScrollRef={controller.headerScrollRef}
+      scrollRef={controller.scrollRef}
+      getItemKey={(row) => row.key}
+      getRowRevision={getRowRevision}
+      virtualize
+      onBodyScrollActivity={onCatalogScroll}
+      renderCell={renderCell}
+      emptyContent={
+        rowsLoading ? (
+          <Box width="100%" paddingX={1} paddingY={1}>
+            <Spinner
+              label={
+                controller.searchQuery.trim().length > 0
+                  ? "Searching markets..."
+                  : "Loading markets..."
+              }
+            />
+          </Box>
+        ) : undefined
+      }
+      emptyStateTitle={
+        emptyWatchlist ? "Nothing in your watchlist." : "No markets matched."
+      }
+      emptyStateHint={
+        emptyWatchlist
+          ? "Press w on any market to add it."
+          : "Change the venue, browse tab, or search query."
+      }
+    />
+  );
+}

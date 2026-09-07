@@ -1,0 +1,19 @@
+{
+  "name": "gloomberb-plugins",
+  "version": "0.1.0",
+  "private": true,
+  "description": "External plugins for Gloomberb — data sources, broker adapters, and research tools.",
+  "type": "module",
+  "license": "MIT",
+  "workspaces": [
+    "plugins/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "^5.9.3"
+  }
+}
