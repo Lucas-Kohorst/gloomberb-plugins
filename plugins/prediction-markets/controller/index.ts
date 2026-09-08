@@ -45,6 +45,9 @@ import type {
 
 const KEYBOARD_DETAIL_LOAD_DELAY_MS = 140;
 const SELECTION_PERSIST_DEBOUNCE_MS = 300;
+const DEFAULT_COLUMN_IDS: string[] = [];
+const EMPTY_WATCHLIST: string[] = [];
+const EMPTY_WATCHLIST_SNAPSHOTS: PredictionMarketSummary[] = [];
 
 export function usePredictionMarketsController({
   focused,
@@ -54,7 +57,7 @@ export function usePredictionMarketsController({
   const dispatch = useAppDispatch();
   const config = useAppSelector((state) => state.config);
   const tickersBySymbol = useAppSelector((state) => state.tickers);
-  const [columnIds] = usePaneSettingValue<string[]>("columnIds", []);
+  const [columnIds] = usePaneSettingValue<string[]>("columnIds", DEFAULT_COLUMN_IDS);
   const [hideTabs] = usePaneSettingValue<boolean>("hideTabs", false);
   const [lockedVenueScope] = usePaneSettingValue<PredictionVenueScope>(
     "lockedVenueScope",
@@ -78,11 +81,11 @@ export function usePredictionMarketsController({
 
   const [watchlist, setWatchlist] = usePluginState<string[]>(
     "watchlist:v1",
-    [],
+    EMPTY_WATCHLIST,
   );
   const [watchlistSnapshots, setWatchlistSnapshots] = usePluginState<
     PredictionMarketSummary[]
-  >("watchlistSnapshots:v1", []);
+  >("watchlistSnapshots:v1", EMPTY_WATCHLIST_SNAPSHOTS);
   const [lastVenueScope, setLastVenueScope] =
     usePluginState<PredictionVenueScope>("lastVenueScope:v1", "all");
 

@@ -263,7 +263,7 @@ export function PredictionMarketsPane({ focused, width, height }: PaneProps) {
     return buildPredictionListRowRevision(
       row,
       watchlistedRowKeys.has(row.key),
-      Date.now(),
+      "",
     );
   }, [watchlistedRowKeys]);
 

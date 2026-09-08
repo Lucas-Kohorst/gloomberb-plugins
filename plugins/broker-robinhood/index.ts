@@ -13,7 +13,14 @@ const ROBINHOOD_CONNECTION_ID = "robinhood";
 type RobinhoodNativeModule = typeof import("./robinhood-native");
 
 function loadRobinhoodNativeModule(): Promise<RobinhoodNativeModule> {
-  return import("./robinhood-native");
+  if (typeof window !== "undefined") {
+    return Promise.reject(
+      new Error("Robinhood sync and trading are unavailable in the desktop plugin runtime."),
+    );
+  }
+  // Keep Node's HTTP implementation out of the browser bundle. This branch
+  // only runs in Bun, where the plugin has access to its native adapter.
+  return import(["./robinhood", "native"].join("-"));
 }
 
 const statuses = new Map<string, BrokerConnectionStatus>();
