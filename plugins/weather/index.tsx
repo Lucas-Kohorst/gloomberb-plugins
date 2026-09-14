@@ -1,5 +1,6 @@
 import type { GloomPlugin } from "gloomberb/types/plugin";
 import { WeatherPane } from "./pane";
+import { weatherBookCliCommand } from "./cli";
 import {
   TWC_KALSHI_URL,
   WEATHER_PANE_ID,
@@ -19,6 +20,7 @@ export const weatherPlugin: GloomPlugin = {
   toggleable: true,
   targets: ["cli", "tui", "desktop"],
   homepage: "https://github.com/Lucas-Kohorst/gloomberb-plugins",
+  cliCommands: [weatherBookCliCommand],
 
   panes: [
     {

@@ -8,6 +8,7 @@ import {
   parseKalshiWeatherSeriesTicker,
   parseWeatherMetric,
   resolveWeatherSettlement,
+  zonedLocalClockUtcMs,
   zonedMidnightUtcMs,
 } from "./mapping";
 import {
@@ -73,6 +74,12 @@ describe("zoned midnight freeze", () => {
     );
     expect(new Date(zonedMidnightUtcMs("2026-08-18", "America/New_York")).toISOString()).toBe(
       "2026-08-18T04:00:00.000Z",
+    );
+  });
+
+  test("maps a local clock onto UTC for PDT", () => {
+    expect(new Date(zonedLocalClockUtcMs("2026-08-18", "America/Los_Angeles", { hour: 11, minute: 0 })).toISOString()).toBe(
+      "2026-08-18T18:00:00.000Z",
     );
   });
 });

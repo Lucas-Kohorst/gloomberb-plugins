@@ -173,6 +173,31 @@ export function zonedMidnightUtcMs(dateKey: string, timeZone: string): number {
   return utc;
 }
 
+/** UTC ms of a local clock on `dateKey` in `timeZone`. */
+export function zonedLocalClockUtcMs(
+  dateKey: string,
+  timeZone: string,
+  clock: { hour: number; minute: number },
+): number {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+  if (!match) return Date.parse(`${dateKey}T00:00:00Z`);
+  const desired = Date.UTC(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    clock.hour,
+    clock.minute,
+    0,
+  );
+  let utc = desired;
+  for (let i = 0; i < 8; i += 1) {
+    const delta = zonedWallTimeUtc(utc, timeZone) - desired;
+    if (delta === 0) return utc;
+    utc -= delta;
+  }
+  return utc;
+}
+
 export function parseKalshiWeatherEventStamp(eventTicker: string | undefined): {
   date: string;
   hour: number | null;
