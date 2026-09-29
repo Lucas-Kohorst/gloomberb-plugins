@@ -35,6 +35,7 @@ Gloomberb links `gloomberb` and `react` from the running install into each plugi
 | country-econ | World Bank country economic indicators | cli, tui, desktop |
 | weather | Weather Company, NWS, Kalshi settlement weather, and `wx-book` CLI | cli, tui, desktop |
 | prediction-markets | Kalshi and Polymarket prediction markets | cli, tui, desktop |
+| hyperliquid | Perp/spot markets, live books, candles, HL: quotes, and read-only wallet positions | cli, tui, desktop |
 | optic-odds | OpticOdds sportsbook odds board | cli, tui, desktop |
 | broker-kalshi | Read-only Kalshi event-contract portfolio | cli, tui, desktop |
 | broker-public | Public.com broker adapter | cli, tui, desktop |
