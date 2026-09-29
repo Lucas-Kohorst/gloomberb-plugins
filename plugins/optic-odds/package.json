@@ -1,7 +1,7 @@
 {
-  "name": "gloomberb-crt-sh",
+  "name": "gloomberb-optic-odds",
   "version": "1.0.0",
-  "description": "crt.sh certificate transparency search for Gloomberb",
+  "description": "Sportsbook odds, fixtures, and results from OpticOdds for Gloomberb",
   "type": "module",
   "main": "index.tsx",
   "license": "MIT",

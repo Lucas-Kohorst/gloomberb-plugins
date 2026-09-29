@@ -9,6 +9,23 @@
         "typescript": "^5.9.3",
       },
     },
+    "plugins/broker-kalshi": {
+      "name": "gloomberb-broker-kalshi",
+      "version": "1.0.0",
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/react": "^19.2.7",
+        "typescript": "^5.9.3",
+      },
+      "peerDependencies": {
+        "gloomberb": ">=0.12.0",
+        "react": ">=19",
+      },
+      "optionalPeers": [
+        "gloomberb",
+        "react",
+      ],
+    },
     "plugins/broker-public": {
       "name": "gloomberb-broker-public",
       "version": "1.0.0",
@@ -82,23 +99,6 @@
     },
     "plugins/country-econ": {
       "name": "gloomberb-country-econ",
-      "version": "1.0.0",
-      "devDependencies": {
-        "@types/bun": "^1.3.14",
-        "@types/react": "^19.2.7",
-        "typescript": "^5.9.3",
-      },
-      "peerDependencies": {
-        "gloomberb": ">=0.12.0",
-        "react": ">=19",
-      },
-      "optionalPeers": [
-        "gloomberb",
-        "react",
-      ],
-    },
-    "plugins/crt-sh": {
-      "name": "gloomberb-crt-sh",
       "version": "1.0.0",
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -199,6 +199,23 @@
         "react",
       ],
     },
+    "plugins/optic-odds": {
+      "name": "gloomberb-optic-odds",
+      "version": "1.0.0",
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/react": "^19.2.7",
+        "typescript": "^5.9.3",
+      },
+      "peerDependencies": {
+        "gloomberb": ">=0.12.0",
+        "react": ">=19",
+      },
+      "optionalPeers": [
+        "gloomberb",
+        "react",
+      ],
+    },
     "plugins/polls": {
       "name": "gloomberb-polls",
       "version": "1.0.0",
@@ -216,7 +233,7 @@
         "react",
       ],
     },
-    "plugins/prediction-markets": {
+    "plugins/prediction-markets.bak": {
       "name": "gloomberb-prediction-markets",
       "version": "1.0.0",
       "devDependencies": {
@@ -421,6 +438,8 @@
 
     "get-proto": ["get-proto@1.0.1", "", { "dependencies": { "dunder-proto": "^1.0.1", "es-object-atoms": "^1.0.0" } }, "sha512-sTSfBjoXBp89JvIKIefqw7U2CCebsc74kiY6awiGogKtoSGbgjYE/G/+l9sF3MWFPNc9IcoOC4ODfKHfxFmp0g=="],
 
+    "gloomberb-broker-kalshi": ["gloomberb-broker-kalshi@workspace:plugins/broker-kalshi"],
+
     "gloomberb-broker-public": ["gloomberb-broker-public@workspace:plugins/broker-public"],
 
     "gloomberb-broker-robinhood": ["gloomberb-broker-robinhood@workspace:plugins/broker-robinhood"],
@@ -430,8 +449,6 @@
     "gloomberb-congress-trades": ["gloomberb-congress-trades@workspace:plugins/congress-trades"],
 
     "gloomberb-country-econ": ["gloomberb-country-econ@workspace:plugins/country-econ"],
-
-    "gloomberb-crt-sh": ["gloomberb-crt-sh@workspace:plugins/crt-sh"],
 
     "gloomberb-defillama": ["gloomberb-defillama@workspace:plugins/defillama"],
 
@@ -443,9 +460,11 @@
 
     "gloomberb-opensky": ["gloomberb-opensky@workspace:plugins/opensky"],
 
+    "gloomberb-optic-odds": ["gloomberb-optic-odds@workspace:plugins/optic-odds"],
+
     "gloomberb-polls": ["gloomberb-polls@workspace:plugins/polls"],
 
-    "gloomberb-prediction-markets": ["gloomberb-prediction-markets@workspace:plugins/prediction-markets"],
+    "gloomberb-prediction-markets": ["gloomberb-prediction-markets@workspace:plugins/prediction-markets.bak"],
 
     "gloomberb-satellite": ["gloomberb-satellite@workspace:plugins/satellite"],
 
