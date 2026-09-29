@@ -53,3 +53,22 @@ test("socket reconnects with subscriptions and stops callbacks/retries on dispos
     stop();
   }
 });
+
+test("allMids subscriptions keep HIP-3 namespaces and the native outcome feed", () => {
+  const socket = new FakeSocket();
+  const stop = subscribe(
+    null,
+    { mids: () => {}, dexes: ["xyz", "", "cash", "xyz"] },
+    () => socket as unknown as WebSocket,
+  );
+  try {
+    socket.onopen?.();
+    expect(socket.sent.map((s) => JSON.parse(s).subscription)).toEqual([
+      { type: "allMids", dex: "xyz" },
+      { type: "allMids" },
+      { type: "allMids", dex: "cash" },
+    ]);
+  } finally {
+    stop();
+  }
+});

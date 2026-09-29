@@ -9,6 +9,7 @@ export interface AssetContext {
   openInterest?: string;
 }
 export interface PerpMeta {
+  collateralToken?: number;
   universe: {
     name: string;
     szDecimals: number;
@@ -23,7 +24,12 @@ export interface SpotMeta {
 export interface Market {
   coin: string;
   name: string;
-  kind: "perp" | "spot";
+  kind: "perp" | "spot" | "hip3" | "hip4";
+  operator: string;
+  operatorName: string;
+  deployer: string | null;
+  description?: string;
+  status?: "current" | "stale";
   currency: string;
   price: number | null;
   previous: number | null;
@@ -76,3 +82,38 @@ export interface SpotState {
   balances: { coin: string; total: string; hold: string }[];
 }
 export type StreamStatus = "connecting" | "live" | "reconnecting";
+
+export interface PerpDex {
+  name: string;
+  fullName: string;
+  deployer: string;
+}
+export interface OutcomeMeta {
+  outcomes: {
+    outcome: number;
+    name: string;
+    description: string;
+    sideSpecs: { name: string }[];
+    quoteToken?: string;
+    venue?: string;
+  }[];
+  deployers?: { venue: string; deployer: string }[];
+  questions?: {
+    question: number;
+    name: string;
+    description: string;
+    fallbackOutcome: number;
+    namedOutcomes: number[];
+  }[];
+}
+export interface Operator {
+  id: string;
+  name: string;
+  protocol: "HIP-3" | "HIP-4";
+  deployer: string;
+}
+export interface Catalog {
+  markets: Market[];
+  operators: Operator[];
+  warnings: string[];
+}

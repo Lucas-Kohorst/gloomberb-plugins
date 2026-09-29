@@ -12,6 +12,8 @@ import {
   number,
   quoteFor,
   searchResult,
+  matchesMarket,
+  marketDex,
 } from "./normalize";
 import { subscribe } from "./ws";
 import type { Market } from "./types";
@@ -99,10 +101,7 @@ export class HyperliquidProvider implements AssetDataProvider {
     const q = query.trim().replace(/^HL:/i, "").toLowerCase();
     if (!q) return [];
     return (await this.api.getMarkets())
-      .filter(
-        (m) =>
-          m.coin.toLowerCase().includes(q) || m.name.toLowerCase().includes(q),
-      )
+      .filter((m) => matchesMarket(m, q))
       .sort(
         (a, b) =>
           Number(b.coin.toLowerCase() === q) -
@@ -183,6 +182,7 @@ export class HyperliquidProvider implements AssetDataProvider {
         if (!active || !matched.length) return;
         started = true;
         stop = this.stream(null, {
+          dexes: [...new Set(matched.map(({ market }) => marketDex(market)))],
           mids: (mids) => {
             if (!active) return;
             for (const { target, market } of matched) {

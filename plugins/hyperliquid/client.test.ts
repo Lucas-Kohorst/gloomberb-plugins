@@ -33,6 +33,8 @@ function fixture() {
   const api = new HyperliquidClient(async (_url, init) => {
     const body = JSON.parse(String(init?.body));
     requests.push(body);
+    if (body.type === "perpDexs") return Response.json([null]);
+    if (body.type === "outcomeMeta") return Response.json({ outcomes: [] });
     if (body.type === "metaAndAssetCtxs") return Response.json(perps);
     if (body.type === "spotMetaAndAssetCtxs") return Response.json(spots);
     if (body.type === "l2Book")
@@ -54,7 +56,7 @@ test("context tuples preserve spot IDs and share concurrent catalog loads", asyn
   const { api, requests } = fixture();
   const [a, b] = await Promise.all([api.getMarkets(), api.getMarkets()]);
   expect(a).toBe(b);
-  expect(requests).toHaveLength(2);
+  expect(requests).toHaveLength(4);
   expect(a[1]).toMatchObject({
     coin: "@107",
     name: "HYPE/USDC",
@@ -63,21 +65,25 @@ test("context tuples preserve spot IDs and share concurrent catalog loads", asyn
     price: 110,
   });
   await api.getMarkets();
-  expect(requests).toHaveLength(2);
-  await api.getMarkets(true);
   expect(requests).toHaveLength(4);
+  await api.getMarkets(true);
+  expect(requests).toHaveLength(8);
 });
 test("failed catalog requests can retry without caching the failure", async () => {
   let fail = true;
-  const api = new HyperliquidClient(async (_u, init) =>
-    fail
-      ? new Response("", { status: 429 })
-      : Response.json(
-          JSON.parse(String(init?.body)).type === "metaAndAssetCtxs"
+  const api = new HyperliquidClient(async (_u, init) => {
+    if (fail) return new Response("", { status: 429 });
+    const type = JSON.parse(String(init?.body)).type;
+    return Response.json(
+      type === "perpDexs"
+        ? [null]
+        : type === "outcomeMeta"
+          ? { outcomes: [] }
+          : type === "metaAndAssetCtxs"
             ? perps
             : spots,
-        ),
-  );
+    );
+  });
   await expect(api.getMarkets()).rejects.toThrow("429");
   fail = false;
   expect(await api.getMarkets()).toHaveLength(2);
