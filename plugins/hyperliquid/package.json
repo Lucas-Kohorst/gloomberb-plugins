@@ -1,7 +1,7 @@
 {
   "name": "gloomberb-hyperliquid",
-  "version": "1.0.0",
-  "description": "Hyperliquid perp and spot markets, live books, candles and read-only wallet positions",
+  "version": "1.1.0",
+  "description": "Hyperliquid native, HIP-3 and HIP-4 markets and operators, live books and candles",
   "type": "module",
   "main": "index.tsx",
   "license": "MIT",

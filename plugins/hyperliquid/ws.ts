@@ -1,6 +1,7 @@
 import { reportConnectionRequest } from "gloomberb/plugins";
 import type { Book, Trade, StreamStatus } from "./types";
 export interface Handlers {
+  dexes?: string[];
   mids?: (mids: Record<string, string>) => void;
   book?: (book: Book) => void;
   trades?: (trades: Trade[]) => void;
@@ -35,13 +36,16 @@ export function subscribe(
         return;
       }
       lastMessage = Date.now();
-      if (handlers.mids)
-        ws.send(
-          JSON.stringify({
-            method: "subscribe",
-            subscription: { type: "allMids" },
-          }),
-        );
+      if (handlers.mids) {
+        for (const dex of new Set(handlers.dexes ?? [""])) {
+          ws.send(
+            JSON.stringify({
+              method: "subscribe",
+              subscription: { type: "allMids", ...(dex ? { dex } : {}) },
+            }),
+          );
+        }
+      }
       if (coin)
         for (const type of ["l2Book", "trades"])
           ws.send(

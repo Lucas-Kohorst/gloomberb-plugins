@@ -8,9 +8,9 @@ let disposers: (() => void)[] = [];
 const plugin: GloomPlugin = {
   id: "hyperliquid",
   name: "Hyperliquid",
-  version: "1.0.0",
+  version: "1.1.0",
   description:
-    "Live Hyperliquid perpetual and spot markets, candles, order books, trades and read-only wallet positions. HL:BTC and HL:@107 quotes.",
+    "Hyperliquid native, HIP-3 and HIP-4 markets and operators, live books, candles and read-only wallet positions.",
   homepage: "https://github.com/Lucas-Kohorst/gloomberb-plugins",
   toggleable: true,
   targets: ["cli", "tui", "desktop"],
@@ -43,7 +43,7 @@ const plugin: GloomPlugin = {
       paneId: "hyperliquid",
       label: "Hyperliquid",
       description:
-        "Search Hyperliquid perpetuals and spot markets; inspect candles, live order books, trades, funding and wallet positions.",
+        "Search Hyperliquid perps, spot, HIP-3 and HIP-4 operators and markets; inspect candles, books, trades and wallet positions.",
       keywords: [
         "hyperliquid",
         "hype",
@@ -52,6 +52,9 @@ const plugin: GloomPlugin = {
         "spot",
         "funding",
         "orderbook",
+        "HIP-3",
+        "HIP-4",
+        "operators",
       ],
       category: "Data",
       shortcut: { prefix: "HL" },
@@ -66,12 +69,16 @@ const plugin: GloomPlugin = {
       name: "hyperliquid",
       aliases: ["hl"],
       description: "Hyperliquid market quotes and order books",
-      help: { usage: ["hyperliquid [coin] [--book]"] },
+      help: {
+        usage: ["hyperliquid [coin] [--book]", "hyperliquid --operators"],
+      },
       execute: async (args, ctx) => {
         const coin = args
           .find((a) => !a.startsWith("--"))
           ?.replace(/^HL:/i, "");
-        if (coin && args.includes("--book"))
+        if (args.includes("--operators"))
+          ctx.printResult({ data: (await client.getCatalog()).operators });
+        else if (coin && args.includes("--book"))
           ctx.printResult({ data: await client.book(coin) });
         else if (coin)
           ctx.printResult({ data: await provider.getQuote(`HL:${coin}`) });
